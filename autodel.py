@@ -14,6 +14,8 @@ RATIO = float(os.getenv("RATIO"))
 PRIVATE_RATIO = float(os.getenv("PRIVATE_RATIO"))
 MIN_SEED_TIME=int(os.getenv("MIN_SEED_TIME"))
 MAX_SEED_TIME=int(os.getenv("MAX_SEED_TIME"))
+DELETE_FILES=os.getenv("DELETE_FILES")
+
 
 # 7 et 30 jours en secondes
 SEEDING_7_DAYS  = int(timedelta(days=MIN_SEED_TIME).total_seconds())
@@ -63,7 +65,7 @@ if to_delete:
         for detail in details:
             print(f"  - {detail}")
     else:
-        client.torrents_delete(delete_files=True, torrent_hashes=to_delete)
+        client.torrents_delete(delete_files=DELETE_FILES, torrent_hashes=to_delete)
         print(f"Deleted {len(to_delete)} torrents")
 else:
     print("No torrents to delete")
