@@ -49,7 +49,7 @@ for torrent in torrents:
     if private:
         if torrent.ratio > PRIVATE_RATIO and seeding_time >= SEEDING_7_DAYS:
             reason.append(f"ratio {torrent.ratio:.2f} > 2 and seeding {seeding_time // 86400} days")
-        elif seeding_time >= SEEDING_30_DAYS and ratio >= RATIO:
+        elif seeding_time >= SEEDING_30_DAYS and torrent.ratio >= RATIO:
             reason.append(f"seeding {seeding_time // 86400} days >= 30")
     else:
         if torrent.ratio > RATIO:
