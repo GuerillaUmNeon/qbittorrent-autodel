@@ -1,71 +1,82 @@
-import qbittorrentapi
-from datetime import timedelta
-from dotenv import load_dotenv
 import argparse
 import os
+from datetime import timedelta
+
+import qbittorrentapi
+from dotenv import load_dotenv
 
 load_dotenv()
 
-QBIT_HOST = os.getenv("QBIT_HOST")
-PORT = os.getenv("PORT")
-USERNAME = os.getenv("USERNAME")
-PASSWORD = os.getenv("PASSWORD")
-RATIO = float(os.getenv("RATIO"))
-PRIVATE_RATIO = float(os.getenv("PRIVATE_RATIO"))
-MIN_SEED_TIME=int(os.getenv("MIN_SEED_TIME"))
-MAX_SEED_TIME=int(os.getenv("MAX_SEED_TIME"))
-DELETE_FILES=os.getenv("DELETE_FILES")
+RATIO = float(os.environ["RATIO"])
+PRIVATE_RATIO = float(os.environ["PRIVATE_RATIO"])
+MIN_SEED_DAYS = int(os.environ["MIN_SEED_TIME"])
+MAX_SEED_DAYS = int(os.environ["MAX_SEED_TIME"])
+DELETE_FILES = os.getenv("DELETE_FILES", "false").strip().lower() in {"true", "1", "yes"}
 
-
-# 7 et 30 jours en secondes
-SEEDING_7_DAYS  = int(timedelta(days=MIN_SEED_TIME).total_seconds())
-SEEDING_30_DAYS = int(timedelta(days=MAX_SEED_TIME).total_seconds())
+MIN_SEED_SECONDS = int(timedelta(days=MIN_SEED_DAYS).total_seconds())
+MAX_SEED_SECONDS = int(timedelta(days=MAX_SEED_DAYS).total_seconds())
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dry-run', action='store_true', help='Preview deletions without removing torrents')
+parser.add_argument(
+    "--dry-run",
+    action="store_true",
+    help="Preview deletions without removing torrents or files",
+)
 args = parser.parse_args()
 
 client = qbittorrentapi.Client(
-    host=f'{QBIT_HOST}:{PORT}',
-    username=USERNAME,
-    password=PASSWORD
+    host=f'{os.environ["QBIT_HOST"]}:{os.environ["PORT"]}',
+    username=os.environ["USERNAME"],
+    password=os.environ["PASSWORD"],
 )
 
 try:
     client.auth_log_in()
 except qbittorrentapi.LoginFailed:
-    print("Login failed - check credentials")
-    exit(1)
+    raise SystemExit("Login failed - check credentials")
 
 torrents = client.torrents_info()
+print(f"Found {len(torrents)} torrents")
+
 to_delete = []
-details = []
 
 for torrent in torrents:
-    seeding_time = getattr(torrent, "seeding_time", 0)  # 0 si absent
-    private = getattr(torrent, "private", False)  # suppose une version ≥5.0
-    reason = []
+    if "private" not in torrent:
+        print(f"SKIP   {torrent.name!r}: private status missing")
+        continue
 
-    if private:
-        if torrent.ratio > PRIVATE_RATIO and seeding_time >= SEEDING_7_DAYS:
-            reason.append(f"ratio {torrent.ratio:.2f} > 2 and seeding {seeding_time // 86400} days")
-        elif seeding_time >= SEEDING_30_DAYS and ratio >= RATIO:
-            reason.append(f"seeding {seeding_time // 86400} days >= 30")
+    is_private = torrent.private
+    if is_private is None:
+        print(f"SKIP   {torrent.name!r}: private status unknown")
+        continue
+
+    seeding_time = torrent.seeding_time
+    current_ratio = torrent.ratio
+
+    if is_private:
+        eligible = (
+            (seeding_time >= MIN_SEED_SECONDS and current_ratio >= PRIVATE_RATIO)
+            or seeding_time >= MAX_SEED_SECONDS
+        )
     else:
-        if torrent.ratio > RATIO:
-            reason.append(f"ratio {torrent.ratio:.2f} > 1")
+        eligible = current_ratio >= RATIO
 
-    if reason:
+    print(
+        f"{'DELETE' if eligible else 'KEEP  '} {torrent.name!r}: "
+        f"private={is_private}, ratio={current_ratio:.2f}, "
+        f"seeding_days={seeding_time / 86400:.1f}"
+    )
+
+    if eligible:
         to_delete.append(torrent.hash)
-        details.append(f"{torrent.name} ({'private' if private else 'public'}): {', '.join(reason)}")
 
-if to_delete:
-    if args.dry_run:
-        print(f"DRY RUN: Would delete {len(details)} torrents:")
-        for detail in details:
-            print(f"  - {detail}")
-    else:
-        client.torrents_delete(delete_files=DELETE_FILES, torrent_hashes=to_delete)
-        print(f"Deleted {len(to_delete)} torrents")
+if args.dry_run:
+    print(f"DRY RUN: Would delete {len(to_delete)} torrents")
+elif to_delete:
+    client.torrents_delete(
+        torrent_hashes=to_delete,
+        delete_files=DELETE_FILES,
+    )
+    print(f"Deleted {len(to_delete)} torrents (delete_files={DELETE_FILES})")
 else:
-    print("No torrents to delete")
+    print("No torrents meet the deletion rules")
