@@ -39,21 +39,17 @@ torrents = client.torrents_info()
 print(f"Found {len(torrents)} torrents")
 
 to_delete = []
+skipped = 0
 
 for torrent in torrents:
-    if "private" not in torrent:
-        print(f"SKIP   {torrent.name!r}: private status missing")
-        continue
-
-    is_private = torrent.private
-    if is_private is None:
-        print(f"SKIP   {torrent.name!r}: private status unknown")
+    if "private" not in torrent or torrent.private is None:
+        skipped += 1
         continue
 
     seeding_time = torrent.seeding_time
     current_ratio = torrent.ratio
 
-    if is_private:
+    if torrent.private:
         eligible = (
             (seeding_time >= MIN_SEED_SECONDS and current_ratio >= PRIVATE_RATIO)
             or seeding_time >= MAX_SEED_SECONDS
@@ -61,14 +57,17 @@ for torrent in torrents:
     else:
         eligible = current_ratio >= RATIO
 
-    print(
-        f"{'DELETE' if eligible else 'KEEP  '} {torrent.name!r}: "
-        f"private={is_private}, ratio={current_ratio:.2f}, "
-        f"seeding_days={seeding_time / 86400:.1f}"
-    )
-
     if eligible:
         to_delete.append(torrent.hash)
+        if args.dry_run:
+            print(
+                f"WOULD DELETE {torrent.name!r}: "
+                f"private={torrent.private}, ratio={current_ratio:.2f}, "
+                f"seeding_days={seeding_time / 86400:.1f}"
+            )
+
+if skipped:
+    print(f"Skipped {skipped} torrents with unknown private status")
 
 if args.dry_run:
     print(f"DRY RUN: Would delete {len(to_delete)} torrents")
